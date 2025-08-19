@@ -1,48 +1,119 @@
-# azure-pipelines.yml  (Self-hosted Windows agent + Maven build with cache)
+# azure-pipelines.yml
+# Self-hosted Windows agent for Maven build + cache
+# Then deploy JAR to Azure WebApps (Dev, Test, Prod)
 
 trigger:
-  - main   # change if your default branch is different
+  - main   # pipeline triggers on push to main
 
-pool:
-  name: SelfHostedPool  # <-- use your self-hosted pool
+pr:
+  - main   # also run on pull requests
 
 variables:
-  # Use a per-pipeline Maven repository folder to enable caching
   MAVEN_CACHE_DIR: '$(Pipeline.Workspace)/.m2'
 
-steps:
-  # Check Java & Maven versions on the agent
-  - script: |
-      echo "Java version:"
-      java -version
-      echo "Maven version:"
-      mvn -version
-    displayName: 'Verify Java & Maven on agent'
+stages:
+# -------------------------------
+# Stage 1: Build & Test
+# -------------------------------
+- stage: Build
+  displayName: "Build and Test"
+  jobs:
+  - job: MavenBuild
+    displayName: "Maven Build Job"
+    pool:
+      name: SelfHostedPool   # <-- your self-hosted pool
+    steps:
+      - script: |
+          echo "Java version:"
+          java -version
+          echo "Maven version:"
+          mvn -version
+        displayName: 'Verify Java & Maven on agent'
 
-  # Cache your Maven local repo to speed up builds
-  - task: Cache@2
-    displayName: 'Cache Maven local repo'
-    inputs:
-      key: 'maven | "$(Agent.OS)" | **/pom.xml'
-      restoreKeys: |
-        maven | "$(Agent.OS)"
-        maven
-      path: '$(MAVEN_CACHE_DIR)'
+      - task: Cache@2
+        displayName: 'Cache Maven local repo'
+        inputs:
+          key: 'maven | "$(Agent.OS)" | **/pom.xml'
+          restoreKeys: |
+            maven | "$(Agent.OS)"
+            maven
+          path: '$(MAVEN_CACHE_DIR)'
 
-  # Build with Maven and redirect local repo to the cached folder
-  - task: Maven@4
-    displayName: 'Build with Maven'
-    inputs:
-      mavenPomFile: 'pom.xml'
-      goals: 'clean package'
-      options: '-Dmaven.repo.local=$(MAVEN_CACHE_DIR)'
-      publishJUnitResults: true
-      testResultsFiles: '**/surefire-reports/TEST-*.xml'
+      - task: Maven@4
+        displayName: 'Build with Maven'
+        inputs:
+          mavenPomFile: 'pom.xml'
+          goals: 'clean package'
+          options: '-Dmaven.repo.local=$(MAVEN_CACHE_DIR)'
+          publishJUnitResults: true
+          testResultsFiles: '**/surefire-reports/TEST-*.xml'
 
-  # Publish the built JAR(s) as pipeline artifacts so you can download them
-  - task: PublishBuildArtifacts@1
-    displayName: 'Publish build artifacts'
-    inputs:
-      PathtoPublish: '$(System.DefaultWorkingDirectory)'
-      ArtifactName: 'drop'
-      publishLocation: 'Container'
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish build artifacts'
+        inputs:
+          PathtoPublish: '$(System.DefaultWorkingDirectory)/target'
+          ArtifactName: 'drop'
+          publishLocation: 'Container'
+
+# -------------------------------
+# Stage 2: Deploy to Dev
+# -------------------------------
+- stage: Deploy_Dev
+  displayName: "Deploy to Development"
+  dependsOn: Build
+  jobs:
+  - job: DeployDev
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - download: current
+        artifact: drop
+
+      - task: AzureWebApp@1
+        displayName: 'Deploy JAR to Azure WebApp (Dev)'
+        inputs:
+          azureSubscription: 'Azure subscription 1'   # <-- Service connection name in DevOps
+          appName: 'lawanya-helloworld-dev'
+          package: '$(Pipeline.Workspace)/drop/*.jar'
+
+# -------------------------------
+# Stage 3: Deploy to Test
+# -------------------------------
+- stage: Deploy_Test
+  displayName: "Deploy to Test"
+  dependsOn: Deploy_Dev
+  jobs:
+  - job: DeployTest
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - download: current
+        artifact: drop
+
+      - task: AzureWebApp@1
+        displayName: 'Deploy JAR to Azure WebApp (Test)'
+        inputs:
+          azureSubscription: 'Azure subscription 1'
+          appName: 'lawanya-helloworld-test'
+          package: '$(Pipeline.Workspace)/drop/*.jar'
+
+# -------------------------------
+# Stage 4: Deploy to Prod (with approval)
+# -------------------------------
+- stage: Deploy_Prod
+  displayName: "Deploy to Production"
+  dependsOn: Deploy_Test
+  jobs:
+  - job: DeployProd
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - download: current
+        artifact: drop
+
+      - task: AzureWebApp@1
+        displayName: 'Deploy JAR to Azure WebApp (Prod)'
+        inputs:
+          azureSubscription: 'Azure subscription 1'
+          appName: 'lawanya-helloworld-prod'
+          package: '$(Pipeline.Workspace)/drop/*.jar'
