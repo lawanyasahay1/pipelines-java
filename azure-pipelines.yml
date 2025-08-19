@@ -64,7 +64,7 @@ stages:
   jobs:
   - job: DeployDev
     pool:
-      vmImage: 'ubuntu-latest'
+      name: SelfHostedPool   # <-- use self-hosted agent
     steps:
       - download: current
         artifact: drop
@@ -85,7 +85,7 @@ stages:
   jobs:
   - job: DeployTest
     pool:
-      vmImage: 'ubuntu-latest'
+      name: SelfHostedPool   # <-- use self-hosted agent
     steps:
       - download: current
         artifact: drop
@@ -106,7 +106,7 @@ stages:
   jobs:
   - job: DeployProd
     pool:
-      vmImage: 'ubuntu-latest'
+      name: SelfHostedPool   # <-- use self-hosted agent
     steps:
       - download: current
         artifact: drop
